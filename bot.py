@@ -7,7 +7,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.tl.functions.channels import InviteToChannelRequest
-from telethon.errors import UserPrivacyRestrictedError, PeerFloodError, UserAlreadyParticipantError
+from telethon.errors import UserPrivacyRestrictedError, PeerFloodError, UserAlreadyParticipantError, FloodWaitError
 
 # ================= CONFIGURATION =================
 API_ID = 34964566
@@ -64,8 +64,8 @@ async def handle_file(event):
             for row in reader:
                 if row:
                     user = row[0].strip()
-                    # "username" wali line skip karega
-                    if user and not user.lower().startswith('username'):
+                    # Check: Agar "username" word ho toh skip karein
+                    if user and user.lower() != 'username' and not user.lower().startswith('@username'):
                         usernames.append(user)
     except Exception as e:
         await event.reply(f"❌ File read error: {e}")
@@ -83,25 +83,30 @@ async def handle_file(event):
         added = 0
         for index, username in enumerate(usernames, 1):
             try:
+                # Username se entity nikalein
                 user_entity = await user_client.get_input_entity(username)
+                
+                # Add karein
                 await user_client(InviteToChannelRequest(channel=target_entity, users=[user_entity]))
                 added += 1
                 await event.reply(f"✅ [{index}/{len(usernames)}] Added: {username}")
                 
+                # Safe Delay
                 delay = random.randint(MIN_DELAY, MAX_DELAY)
                 await asyncio.sleep(delay)
 
+            except FloodWaitError as e:
+                await event.reply(f"⏳ Flood wait: {e.seconds} sec... (Telegram ne block kiya hai)")
+                await asyncio.sleep(e.seconds + 10)
             except UserPrivacyRestrictedError:
                 await event.reply(f"❌ Privacy restricted: {username}")
             except PeerFloodError:
-                await event.reply("🚫 Telegram ne account block kar diya hai (PeerFlood). 24 ghante rest karein.")
+                await event.reply("🚫 Account ban ho gaya! 24 ghante rest karein.")
                 break
             except UserAlreadyParticipantError:
                 await event.reply(f"⏩ Already in group: {username}")
             except Exception as e:
-                # FloodWait aayega toh yahan crash hoga aur Render band ho jayega
                 await event.reply(f"⚠️ Error: {username} - {e}")
-                break # Loop rok dega
 
     await event.reply(f"🎉 Kaam khatam! Total {added} members add hue.")
 
@@ -112,5 +117,7 @@ async def main():
     await bot_client.run_until_disconnected()
 
 if __name__ == '__main__':
+    # Web server start karein background me
     threading.Thread(target=run_dummy_server, daemon=True).start()
+    # Bot start karein
     asyncio.run(main())
